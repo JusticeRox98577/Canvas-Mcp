@@ -1,22 +1,8 @@
-/**
- * Canvas API client that authenticates using browser session cookies.
- *
- * Districts often block personal access token creation (User Settings → Access Tokens),
- * but Canvas's REST API also accepts the same session cookies your browser uses when
- * you're logged in normally. This client uses those cookies instead.
- *
- * How to get your session cookie:
- *   1. Log into Canvas in Chrome/Firefox/Edge.
- *   2. Open DevTools → Application (Chrome) or Storage (Firefox) → Cookies.
- *   3. Find the cookie named `canvas_session` for your Canvas domain.
- *   4. Copy its value and set it as CANVAS_SESSION_COOKIE in your environment.
- */
-
 export interface CanvasConfig {
   /** e.g. "https://myschool.instructure.com" — no trailing slash */
   baseUrl: string;
-  /** Value of the `canvas_session` cookie from your logged-in browser */
-  sessionCookie: string;
+  /** Called to get a fresh cookie (triggers browser login if needed) */
+  getSessionCookie: () => Promise<string>;
 }
 
 export interface Course {
@@ -97,64 +83,71 @@ export interface GradeInfo {
 
 export class CanvasClient {
   private baseUrl: string;
-  private headers: Record<string, string>;
+  private getSessionCookie: () => Promise<string>;
+  private currentCookie: string = "";
 
   constructor(config: CanvasConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.headers = {
-      Cookie: `canvas_session=${config.sessionCookie}`,
+    this.getSessionCookie = config.getSessionCookie;
+  }
+
+  async init(): Promise<void> {
+    this.currentCookie = await this.getSessionCookie();
+  }
+
+  private makeHeaders(): Record<string, string> {
+    return {
+      Cookie: `canvas_session=${this.currentCookie}`,
       Accept: "application/json",
-      // Canvas requires this header when using cookie auth to prevent CSRF
       "X-Requested-With": "XMLHttpRequest",
     };
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(path: string, attempt = 0): Promise<T> {
     const url = `${this.baseUrl}/api/v1${path}`;
-    const res = await fetch(url, {
-      ...options,
-      headers: { ...this.headers, ...(options.headers as Record<string, string> | undefined) },
-    });
+    const res = await fetch(url, { headers: this.makeHeaders() });
 
-    if (res.status === 401) {
-      throw new Error(
-        "Canvas returned 401 Unauthorized. Your session cookie may have expired — log back into Canvas and copy a fresh cookie value."
-      );
+    if (res.status === 401 && attempt === 0) {
+      // Cookie expired — get a fresh one (triggers browser login) and retry once
+      console.error("[Canvas MCP] Session expired, re-authenticating...");
+      this.currentCookie = await this.getSessionCookie();
+      return this.request<T>(path, 1);
     }
+
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`Canvas API error ${res.status}: ${body.slice(0, 300)}`);
+      throw new Error(`Canvas API ${res.status}: ${body.slice(0, 300)}`);
     }
 
     return res.json() as Promise<T>;
   }
 
-  /** Follow Canvas pagination and collect all pages. */
-  private async requestAll<T>(path: string): Promise<T[]> {
-    const separator = path.includes("?") ? "&" : "?";
-    const firstPage = await fetch(`${this.baseUrl}/api/v1${path}${separator}per_page=100`, {
-      headers: this.headers,
-    });
+  /** Follows Canvas Link header pagination and returns all items. */
+  private async requestAll<T>(path: string, attempt = 0): Promise<T[]> {
+    const sep = path.includes("?") ? "&" : "?";
+    const firstRes = await fetch(
+      `${this.baseUrl}/api/v1${path}${sep}per_page=100`,
+      { headers: this.makeHeaders() }
+    );
 
-    if (firstPage.status === 401) {
-      throw new Error(
-        "Canvas returned 401 Unauthorized. Your session cookie may have expired."
-      );
-    }
-    if (!firstPage.ok) {
-      const body = await firstPage.text().catch(() => "");
-      throw new Error(`Canvas API error ${firstPage.status}: ${body.slice(0, 300)}`);
+    if (firstRes.status === 401 && attempt === 0) {
+      console.error("[Canvas MCP] Session expired, re-authenticating...");
+      this.currentCookie = await this.getSessionCookie();
+      return this.requestAll<T>(path, 1);
     }
 
-    const items: T[] = await firstPage.json();
-    const linkHeader = firstPage.headers.get("Link") ?? "";
+    if (!firstRes.ok) {
+      const body = await firstRes.text().catch(() => "");
+      throw new Error(`Canvas API ${firstRes.status}: ${body.slice(0, 300)}`);
+    }
 
-    let nextUrl = this.parseNextLink(linkHeader);
+    const items: T[] = await firstRes.json();
+    let nextUrl = this.parseNextLink(firstRes.headers.get("Link") ?? "");
+
     while (nextUrl) {
-      const page = await fetch(nextUrl, { headers: this.headers });
+      const page = await fetch(nextUrl, { headers: this.makeHeaders() });
       if (!page.ok) break;
-      const pageItems: T[] = await page.json();
-      items.push(...pageItems);
+      items.push(...(await page.json() as T[]));
       nextUrl = this.parseNextLink(page.headers.get("Link") ?? "");
     }
 
@@ -162,19 +155,18 @@ export class CanvasClient {
   }
 
   private parseNextLink(linkHeader: string): string | null {
-    // Link: <url>; rel="next", <url>; rel="last"
     const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
     return match ? match[1] : null;
   }
 
   async getCourses(enrollmentState: "active" | "completed" | "all" = "active"): Promise<Course[]> {
     const state = enrollmentState === "all" ? "" : `&enrollment_state=${enrollmentState}`;
-    return this.requestAll<Course>(`/courses?include[]=course_image${state}`);
+    return this.requestAll<Course>(`/courses?${state}`);
   }
 
-  async getAssignments(courseId: number, orderBy: "due_at" | "name" = "due_at"): Promise<Assignment[]> {
+  async getAssignments(courseId: number): Promise<Assignment[]> {
     return this.requestAll<Assignment>(
-      `/courses/${courseId}/assignments?order_by=${orderBy}&include[]=description`
+      `/courses/${courseId}/assignments?order_by=due_at&include[]=description`
     );
   }
 
@@ -199,7 +191,7 @@ export class CanvasClient {
         final_grade: string | null;
         final_score: number | null;
       };
-    }>(`/users/self/enrollments?type[]=StudentEnrollment&state[]=active&include[]=observed_users`);
+    }>(`/users/self/enrollments?type[]=StudentEnrollment&state[]=active`);
 
     const courses = await this.getCourses("active");
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
@@ -215,11 +207,13 @@ export class CanvasClient {
   }
 
   async getAnnouncements(courseId: number): Promise<Announcement[]> {
-    return this.requestAll<Announcement>(`/courses/${courseId}/discussion_topics?only_announcements=true`);
+    return this.requestAll<Announcement>(
+      `/courses/${courseId}/discussion_topics?only_announcements=true`
+    );
   }
 
   async getModules(courseId: number): Promise<Module[]> {
-    return this.requestAll<Module>(`/courses/${courseId}/modules?include[]=items`);
+    return this.requestAll<Module>(`/courses/${courseId}/modules`);
   }
 
   async getModuleItems(courseId: number, moduleId: number): Promise<ModuleItem[]> {
@@ -227,7 +221,9 @@ export class CanvasClient {
   }
 
   async getFiles(courseId: number): Promise<CanvasFile[]> {
-    return this.requestAll<CanvasFile>(`/courses/${courseId}/files?sort=updated_at&order=desc`);
+    return this.requestAll<CanvasFile>(
+      `/courses/${courseId}/files?sort=updated_at&order=desc`
+    );
   }
 
   async getUserProfile(): Promise<{ id: number; name: string; login_id: string; email: string }> {

@@ -1,7 +1,7 @@
 {
   "name": "canvas-mcp",
   "version": "1.0.0",
-  "description": "Canvas LMS MCP server — authenticates via session cookies, no API token required",
+  "description": "Canvas LMS MCP server — automatically logs in via browser, no API token or manual cookie copying required",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -11,10 +11,12 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "install-browser": "npx playwright install chromium --with-deps"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.44.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

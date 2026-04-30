@@ -7,26 +7,51 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { CanvasClient } from "./canvas-client.js";
+import { loadCookie, saveCookie, clearCookie } from "./auth/cookie-store.js";
+import { loginViaBrowser } from "./auth/browser-login.js";
 
-// ── Config from environment ───────────────────────────────────────────────────
+// ── Config ────────────────────────────────────────────────────────────────────
 
 const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL?.trim();
-const CANVAS_SESSION_COOKIE = process.env.CANVAS_SESSION_COOKIE?.trim();
 
-if (!CANVAS_BASE_URL || !CANVAS_SESSION_COOKIE) {
+if (!CANVAS_BASE_URL) {
   console.error(
-    "Error: CANVAS_BASE_URL and CANVAS_SESSION_COOKIE must be set.\n" +
-      "  CANVAS_BASE_URL         — e.g. https://myschool.instructure.com\n" +
-      "  CANVAS_SESSION_COOKIE   — the canvas_session cookie from your logged-in browser\n\n" +
-      "See README.md for instructions on finding your session cookie."
+    "Error: CANVAS_BASE_URL must be set in your MCP config.\n" +
+      "  Example: https://myschool.instructure.com\n\n" +
+      "See README.md for setup instructions."
   );
   process.exit(1);
 }
 
+// ── Auth: load from cache, or open browser to log in ─────────────────────────
+
+async function getSessionCookie(): Promise<string> {
+  const cached = loadCookie(CANVAS_BASE_URL!);
+  if (cached) return cached;
+
+  // No valid cached cookie — open a browser window for the user to log in.
+  // Supports native Canvas login, Google SSO, Microsoft SSO, MFA, etc.
+  const fresh = await loginViaBrowser(CANVAS_BASE_URL!);
+  saveCookie(CANVAS_BASE_URL!, fresh);
+  return fresh;
+}
+
+// On a 401 we clear the stale cookie so the next getSessionCookie() call
+// triggers a fresh browser login rather than replaying an expired value.
+async function getSessionCookieWithClear(): Promise<string> {
+  clearCookie();
+  return getSessionCookie();
+}
+
+// ── Canvas client ─────────────────────────────────────────────────────────────
+
 const client = new CanvasClient({
   baseUrl: CANVAS_BASE_URL,
-  sessionCookie: CANVAS_SESSION_COOKIE,
+  getSessionCookie: getSessionCookieWithClear,
 });
+
+// Initialise (loads or acquires the session cookie before accepting requests)
+await client.init();
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -165,58 +190,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "canvas_get_profile":
         result = await client.getUserProfile();
         break;
-
       case "canvas_list_courses":
         result = await client.getCourses(
           (args?.enrollment_state as "active" | "completed" | "all") ?? "active"
         );
         break;
-
       case "canvas_list_assignments":
         result = await client.getAssignments(Number(args!.course_id));
         break;
-
       case "canvas_get_assignment":
-        result = await client.getAssignment(
-          Number(args!.course_id),
-          Number(args!.assignment_id)
-        );
+        result = await client.getAssignment(Number(args!.course_id), Number(args!.assignment_id));
         break;
-
       case "canvas_get_submission":
-        result = await client.getSubmission(
-          Number(args!.course_id),
-          Number(args!.assignment_id)
-        );
+        result = await client.getSubmission(Number(args!.course_id), Number(args!.assignment_id));
         break;
-
       case "canvas_get_grades":
         result = await client.getGrades();
         break;
-
       case "canvas_list_announcements":
         result = await client.getAnnouncements(Number(args!.course_id));
         break;
-
       case "canvas_list_modules":
         result = await client.getModules(Number(args!.course_id));
         break;
-
       case "canvas_list_module_items":
-        result = await client.getModuleItems(
-          Number(args!.course_id),
-          Number(args!.module_id)
-        );
+        result = await client.getModuleItems(Number(args!.course_id), Number(args!.module_id));
         break;
-
       case "canvas_list_files":
         result = await client.getFiles(Number(args!.course_id));
         break;
-
       case "canvas_upcoming_assignments":
         result = await client.getUpcomingAssignments();
         break;
-
       default:
         return {
           content: [{ type: "text", text: `Unknown tool: ${name}` }],
@@ -224,15 +229,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 
-    return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return {
-      content: [{ type: "text", text: `Error: ${message}` }],
-      isError: true,
-    };
+    return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
   }
 });
 

@@ -1,85 +1,53 @@
 # Canvas MCP
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI assistants (Claude, etc.) read your Canvas LMS data — **without needing to generate an API access token**.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that lets AI assistants (Claude, etc.) read your Canvas LMS data — **no API token, no manual cookie copying, no admin approval needed**.
 
-Many school districts block students and teachers from creating personal access tokens in Canvas (User Settings → Access Tokens). This server uses your **browser session cookie** instead, which is always available as long as you are logged into Canvas normally.
+When your district blocks personal access token creation, this server logs into Canvas automatically using a real browser window. You log in normally (any method: username/password, Google SSO, Microsoft SSO, MFA), and the session is captured and cached silently. No DevTools, no copying anything.
 
 ---
 
 ## How It Works
 
-When you log into Canvas in a browser, Canvas creates a session cookie called `canvas_session`. The Canvas REST API accepts this same cookie for authentication — it is identical to what the web app uses. This server reads that cookie from your environment and attaches it to every API request.
-
-No token generation. No admin approval. No extra permissions.
+1. On first launch, a browser window opens pointing to your Canvas login page.
+2. You log in exactly as you normally would (supports all SSO and MFA methods).
+3. Once logged in, the browser closes automatically and your session is saved locally.
+4. All future launches use the saved session — no browser window, fully silent.
+5. When your session eventually expires, the browser reopens automatically so you can log in again.
 
 ---
 
 ## Prerequisites
 
-- [Node.js 18 or later](https://nodejs.org/) (works on Mac and Windows)
-- A Canvas account you can log into in a browser
+- [Node.js 18 or later](https://nodejs.org/) — works on Mac and Windows
 - Claude Desktop (or any MCP-compatible client)
 
 ---
 
-## Step 1 — Get Your Session Cookie
+## Setup (3 steps)
 
-You need to copy the `canvas_session` cookie from your browser **while you are logged into Canvas**.
+### Step 1 — Install
 
-### Chrome / Edge (Mac and Windows)
-
-1. Go to your Canvas URL (e.g. `https://myschool.instructure.com`) and log in.
-2. Press **F12** to open DevTools (or right-click → Inspect).
-3. Click the **Application** tab.
-4. In the left sidebar expand **Cookies** and click your Canvas URL.
-5. Find the row named **`canvas_session`**.
-6. Double-click the **Value** column and copy the entire value.
-
-### Firefox (Mac and Windows)
-
-1. Log into Canvas.
-2. Press **F12** → click **Storage** tab.
-3. Expand **Cookies** → click your Canvas URL.
-4. Find **`canvas_session`** and copy its value.
-
-### Safari (Mac)
-
-1. Enable the Develop menu: Safari → Settings → Advanced → check "Show Develop menu".
-2. Log into Canvas.
-3. Develop → Show Web Inspector → Storage → Cookies → your Canvas URL.
-4. Copy the **`canvas_session`** value.
-
-> **Note:** Session cookies expire when you log out or after a period of inactivity. If the server starts returning "401 Unauthorized", just log into Canvas again and copy a fresh cookie.
-
----
-
-## Step 2 — Install and Build
-
-Open a terminal (Mac: Terminal / Windows: Command Prompt or PowerShell) and run:
+Open a terminal (Mac: Terminal / Windows: Command Prompt or PowerShell):
 
 ```bash
-# 1. Clone this repo
 git clone https://github.com/justicerox98577/canvas-mcp.git
 cd canvas-mcp
-
-# 2. Install dependencies
 npm install
-
-# 3. Build
-npm run build
 ```
 
----
+### Step 2 — Install the browser
 
-## Step 3 — Configure Claude Desktop
+This only needs to be done once. It downloads a local Chromium browser (~150 MB) used for automatic login:
 
-Claude Desktop reads MCP server configuration from a JSON file.
+```bash
+npm run install-browser
+```
 
-### Mac
+### Step 3 — Configure Claude Desktop
 
-File location: `~/Library/Application Support/Claude/claude_desktop_config.json`
+Open the Claude Desktop config file and add the `canvas` server block.
 
-Open it with any text editor (or create it if it doesn't exist) and add:
+**Mac** — file location: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -88,24 +56,16 @@ Open it with any text editor (or create it if it doesn't exist) and add:
       "command": "node",
       "args": ["/Users/YOUR_USERNAME/canvas-mcp/dist/index.js"],
       "env": {
-        "CANVAS_BASE_URL": "https://myschool.instructure.com",
-        "CANVAS_SESSION_COOKIE": "PASTE_YOUR_canvas_session_VALUE_HERE"
+        "CANVAS_BASE_URL": "https://myschool.instructure.com"
       }
     }
   }
 }
 ```
 
-Replace:
-- `/Users/YOUR_USERNAME/canvas-mcp` with the actual path where you cloned this repo
-- `https://myschool.instructure.com` with your school's Canvas URL
-- `PASTE_YOUR_canvas_session_VALUE_HERE` with the cookie value from Step 1
+**Windows** — file location: `%APPDATA%\Claude\claude_desktop_config.json`
 
-### Windows
-
-File location: `%APPDATA%\Claude\claude_desktop_config.json`
-
-You can open it quickly by pressing **Win + R**, pasting `%APPDATA%\Claude\claude_desktop_config.json`, and pressing Enter.
+You can open it quickly by pressing **Win + R**, pasting that path, and pressing Enter.
 
 ```json
 {
@@ -114,21 +74,18 @@ You can open it quickly by pressing **Win + R**, pasting `%APPDATA%\Claude\claud
       "command": "node",
       "args": ["C:\\Users\\YOUR_USERNAME\\canvas-mcp\\dist\\index.js"],
       "env": {
-        "CANVAS_BASE_URL": "https://myschool.instructure.com",
-        "CANVAS_SESSION_COOKIE": "PASTE_YOUR_canvas_session_VALUE_HERE"
+        "CANVAS_BASE_URL": "https://myschool.instructure.com"
       }
     }
   }
 }
 ```
 
-Replace the path, URL, and cookie value as above. Note that Windows paths use double backslashes (`\\`) inside JSON.
+Replace:
+- The path with wherever you cloned this repo (Windows paths need double backslashes `\\`)
+- `https://myschool.instructure.com` with your actual Canvas URL
 
----
-
-## Step 4 — Restart Claude Desktop
-
-Quit and reopen Claude Desktop. The Canvas tools will now appear automatically.
+Then **restart Claude Desktop**. The first time it loads, a browser window will open — log in and it will close on its own.
 
 ---
 
@@ -156,23 +113,27 @@ Quit and reopen Claude Desktop. The Canvas tools will now appear automatically.
 What assignments do I have due this week?
 Show me my grades for all my current courses.
 Summarize the announcements in my Biology course.
-What are the files available in course 12345?
+What files are available in course 12345?
 ```
 
 ---
 
 ## Troubleshooting
 
-**"401 Unauthorized"** — Your session cookie expired. Log back into Canvas, copy a fresh `canvas_session` value, and update `claude_desktop_config.json`.
+**Browser window doesn't open / closes immediately** — Make sure you ran `npm run install-browser` first.
 
-**"CANVAS_BASE_URL and CANVAS_SESSION_COOKIE must be set"** — The environment variables are missing from `claude_desktop_config.json`. Double-check the `env` block.
+**Login window opens but closes before I can finish MFA** — The window allows up to 10 minutes. If your MFA takes longer than that, open an issue.
 
-**Claude doesn't show Canvas tools** — Make sure you restarted Claude Desktop after editing the config file.
+**"CANVAS_BASE_URL must be set"** — The env block is missing from your Claude Desktop config. Check the setup above.
 
-**Windows path errors** — Use double backslashes in the path: `C:\\Users\\Name\\canvas-mcp\\dist\\index.js`.
+**Canvas tools don't appear in Claude** — Restart Claude Desktop after editing the config file.
+
+**Windows path errors** — Use double backslashes: `C:\\Users\\Name\\canvas-mcp\\dist\\index.js`.
 
 ---
 
 ## Privacy
 
-Your session cookie is stored only in your local Claude Desktop config file and is never sent anywhere except your own school's Canvas server. No third-party services are involved.
+- Your Canvas session is saved to `~/.canvas-mcp/session.json` on your own machine only.
+- No credentials or tokens are ever sent to any third-party service.
+- Data flows only between your machine and your school's Canvas server.
