@@ -65,7 +65,20 @@ Open the Claude Desktop config file and add the `canvas` server block.
 
 **Windows** — file location: `%APPDATA%\Claude\claude_desktop_config.json`
 
-You can open it quickly by pressing **Win + R**, pasting that path, and pressing Enter.
+The `Claude` folder and config file may not exist yet — run these two commands in **PowerShell** to create them:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:APPDATA\Claude"
+New-Item -ItemType File -Force -Path "$env:APPDATA\Claude\claude_desktop_config.json"
+```
+
+Then open the file in Notepad:
+
+```powershell
+notepad "$env:APPDATA\Claude\claude_desktop_config.json"
+```
+
+Paste this content (replace the path and URL):
 
 ```json
 {
@@ -81,8 +94,16 @@ You can open it quickly by pressing **Win + R**, pasting that path, and pressing
 }
 ```
 
+To find your exact path, run this in PowerShell — it prints the full path to paste into the config:
+
+```powershell
+(Resolve-Path ".\dist\index.js").Path -replace '\\', '\\'
+```
+
+(Run that from inside the `canvas-mcp` folder.)
+
 Replace:
-- The path with wherever you cloned this repo (Windows paths need double backslashes `\\`)
+- The `args` path with the output of the command above
 - `https://myschool.instructure.com` with your actual Canvas URL
 
 Then **restart Claude Desktop**. The first time it loads, a browser window will open — log in and it will close on its own.
@@ -126,9 +147,11 @@ What files are available in course 12345?
 
 **"CANVAS_BASE_URL must be set"** — The env block is missing from your Claude Desktop config. Check the setup above.
 
+**"No Claude folder in AppData\Roaming"** — It doesn't exist until you create it. Run the PowerShell commands in Step 3 above to create the folder and file.
+
 **Canvas tools don't appear in Claude** — Restart Claude Desktop after editing the config file.
 
-**Windows path errors** — Use double backslashes: `C:\\Users\\Name\\canvas-mcp\\dist\\index.js`.
+**Windows path errors** — Use double backslashes: `C:\\Users\\Name\\canvas-mcp\\dist\\index.js`. Use the PowerShell `Resolve-Path` command in Step 3 to get the correct path automatically.
 
 ---
 
