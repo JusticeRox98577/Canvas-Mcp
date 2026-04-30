@@ -1,0 +1,26 @@
+{
+  "name": "canvas-mcp",
+  "version": "1.0.0",
+  "description": "Canvas LMS MCP server — authenticates via session cookies, no API token required",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "canvas-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
