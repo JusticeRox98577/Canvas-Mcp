@@ -7,7 +7,7 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { CanvasClient } from "./canvas-client.js";
-import { loadCookie, saveCookie, clearCookie } from "./auth/cookie-store.js";
+import { loadSession, clearSession } from "./auth/cookie-store.js";
 import { loginViaBrowser } from "./auth/browser-login.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -23,34 +23,27 @@ if (!CANVAS_BASE_URL) {
   process.exit(1);
 }
 
-// ── Auth: load from cache, or open browser to log in ─────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
-async function getSessionCookie(): Promise<string> {
-  const cached = loadCookie(CANVAS_BASE_URL!);
+async function getSession() {
+  const cached = loadSession(CANVAS_BASE_URL!);
   if (cached) return cached;
-
-  // No valid cached cookie — open a browser window for the user to log in.
-  // Supports native Canvas login, Google SSO, Microsoft SSO, MFA, etc.
-  const fresh = await loginViaBrowser(CANVAS_BASE_URL!);
-  saveCookie(CANVAS_BASE_URL!, fresh);
-  return fresh;
+  return loginViaBrowser(CANVAS_BASE_URL!);
 }
 
-// On a 401 we clear the stale cookie so the next getSessionCookie() call
-// triggers a fresh browser login rather than replaying an expired value.
-async function getSessionCookieWithClear(): Promise<string> {
-  clearCookie();
-  return getSessionCookie();
+async function getSessionWithClear() {
+  clearSession();
+  return getSession();
 }
 
-// ── Canvas client ─────────────────────────────────────────────────────────────
+// ── Client ────────────────────────────────────────────────────────────────────
 
 const client = new CanvasClient({
   baseUrl: CANVAS_BASE_URL,
-  getSessionCookie: getSessionCookieWithClear,
+  getSession: getSessionWithClear,
 });
 
-// ── Tool definitions ──────────────────────────────────────────────────────────
+// ── Tools ─────────────────────────────────────────────────────────────────────
 
 const TOOLS: Tool[] = [
   {
@@ -79,10 +72,7 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        course_id: {
-          type: "number",
-          description: "Canvas course ID (use canvas_list_courses to find it).",
-        },
+        course_id: { type: "number", description: "Canvas course ID." },
       },
       required: ["course_id"],
     },
@@ -90,6 +80,18 @@ const TOOLS: Tool[] = [
   {
     name: "canvas_get_assignment",
     description: "Get full details of a single assignment including its description.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        course_id: { type: "number" },
+        assignment_id: { type: "number" },
+      },
+      required: ["course_id", "assignment_id"],
+    },
+  },
+  {
+    name: "canvas_get_assignment_attachments",
+    description: "Get files attached to an assignment (worksheets, rubrics, etc.) with their IDs for downloading.",
     inputSchema: {
       type: "object",
       properties: {
@@ -121,9 +123,7 @@ const TOOLS: Tool[] = [
     description: "List announcements for a course.",
     inputSchema: {
       type: "object",
-      properties: {
-        course_id: { type: "number" },
-      },
+      properties: { course_id: { type: "number" } },
       required: ["course_id"],
     },
   },
@@ -132,9 +132,7 @@ const TOOLS: Tool[] = [
     description: "List modules (units/weeks) in a course.",
     inputSchema: {
       type: "object",
-      properties: {
-        course_id: { type: "number" },
-      },
+      properties: { course_id: { type: "number" } },
       required: ["course_id"],
     },
   },
@@ -155,9 +153,7 @@ const TOOLS: Tool[] = [
     description: "List files in a course (most recently updated first).",
     inputSchema: {
       type: "object",
-      properties: {
-        course_id: { type: "number" },
-      },
+      properties: { course_id: { type: "number" } },
       required: ["course_id"],
     },
   },
@@ -166,9 +162,64 @@ const TOOLS: Tool[] = [
     description: "List upcoming assignments and events across all courses.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
+  {
+    name: "canvas_download_file",
+    description:
+      "Download a Canvas file to your local machine by its file ID. " +
+      "Use canvas_list_files or canvas_get_assignment_attachments to find file IDs. " +
+      "Returns the local path the file was saved to.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_id: { type: "number", description: "Canvas file ID." },
+        save_path: {
+          type: "string",
+          description:
+            "Full local path to save the file (optional). Defaults to ~/canvas-downloads/<filename>.",
+        },
+      },
+      required: ["file_id"],
+    },
+  },
+  {
+    name: "canvas_submit_text",
+    description:
+      "Submit an assignment as an online text entry. Use this when the assignment accepts typed responses.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        course_id: { type: "number" },
+        assignment_id: { type: "number" },
+        body: {
+          type: "string",
+          description: "The text content to submit. HTML is supported.",
+        },
+      },
+      required: ["course_id", "assignment_id", "body"],
+    },
+  },
+  {
+    name: "canvas_submit_file",
+    description:
+      "Upload a local file and submit it as an assignment. " +
+      "Provide the full path to a file on this machine. " +
+      "Use this when the assignment accepts file uploads.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        course_id: { type: "number" },
+        assignment_id: { type: "number" },
+        file_path: {
+          type: "string",
+          description: "Full local path to the file to upload and submit.",
+        },
+      },
+      required: ["course_id", "assignment_id", "file_path"],
+    },
+  },
 ];
 
-// ── MCP Server ────────────────────────────────────────────────────────────────
+// ── Server ────────────────────────────────────────────────────────────────────
 
 const server = new Server(
   { name: "canvas-mcp", version: "1.0.0" },
@@ -179,7 +230,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-
   try {
     let result: unknown;
 
@@ -197,6 +247,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "canvas_get_assignment":
         result = await client.getAssignment(Number(args!.course_id), Number(args!.assignment_id));
+        break;
+      case "canvas_get_assignment_attachments":
+        result = await client.getAssignmentAttachments(Number(args!.course_id), Number(args!.assignment_id));
         break;
       case "canvas_get_submission":
         result = await client.getSubmission(Number(args!.course_id), Number(args!.assignment_id));
@@ -219,11 +272,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "canvas_upcoming_assignments":
         result = await client.getUpcomingAssignments();
         break;
+      case "canvas_download_file":
+        result = await client.downloadFile(
+          Number(args!.file_id),
+          args?.save_path as string | undefined
+        );
+        break;
+      case "canvas_submit_text":
+        result = await client.submitAssignmentText(
+          Number(args!.course_id),
+          Number(args!.assignment_id),
+          String(args!.body)
+        );
+        break;
+      case "canvas_submit_file":
+        result = await client.submitAssignmentFile(
+          Number(args!.course_id),
+          Number(args!.assignment_id),
+          String(args!.file_path)
+        );
+        break;
       default:
-        return {
-          content: [{ type: "text", text: `Unknown tool: ${name}` }],
-          isError: true,
-        };
+        return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
     }
 
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
@@ -232,8 +302,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
   }
 });
-
-// ── Start ─────────────────────────────────────────────────────────────────────
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
