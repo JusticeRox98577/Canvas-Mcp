@@ -63,19 +63,19 @@ Open the Claude Desktop config file and add the `canvas` server block.
 }
 ```
 
-**Windows** — file location: `%APPDATA%\Claude\claude_desktop_config.json`
+**Windows** — file location: `%LOCALAPPDATA%\Claude\claude_desktop_config.json`
 
-The `Claude` folder and config file may not exist yet — run these two commands in **PowerShell** to create them:
+The config file lives in **Local** (`AppData\Local`), not Roaming. Run these commands in **PowerShell** to create it:
 
 ```powershell
-New-Item -ItemType Directory -Force -Path "$env:APPDATA\Claude"
-New-Item -ItemType File -Force -Path "$env:APPDATA\Claude\claude_desktop_config.json"
+New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Claude"
+New-Item -ItemType File -Force -Path "$env:LOCALAPPDATA\Claude\claude_desktop_config.json"
 ```
 
 Then open the file in Notepad:
 
 ```powershell
-notepad "$env:APPDATA\Claude\claude_desktop_config.json"
+notepad "$env:LOCALAPPDATA\Claude\claude_desktop_config.json"
 ```
 
 Paste this content (replace the path and URL):
@@ -147,7 +147,7 @@ What files are available in course 12345?
 
 **"CANVAS_BASE_URL must be set"** — The env block is missing from your Claude Desktop config. Check the setup above.
 
-**"No Claude folder in AppData\Roaming"** — It doesn't exist until you create it. Run the PowerShell commands in Step 3 above to create the folder and file.
+**"No Claude folder in AppData"** — The config goes in `AppData\Local\Claude\`, not `AppData\Roaming\Claude\`. Run the PowerShell commands in Step 3 above to create the folder and file in the right place.
 
 **Canvas tools don't appear in Claude** — Restart Claude Desktop after editing the config file.
 
