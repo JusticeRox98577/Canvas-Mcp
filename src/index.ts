@@ -50,9 +50,6 @@ const client = new CanvasClient({
   getSessionCookie: getSessionCookieWithClear,
 });
 
-// Initialise (loads or acquires the session cookie before accepting requests)
-await client.init();
-
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS: Tool[] = [

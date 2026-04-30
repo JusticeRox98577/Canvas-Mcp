@@ -91,8 +91,10 @@ export class CanvasClient {
     this.getSessionCookie = config.getSessionCookie;
   }
 
-  async init(): Promise<void> {
-    this.currentCookie = await this.getSessionCookie();
+  private async ensureCookie(): Promise<void> {
+    if (!this.currentCookie) {
+      this.currentCookie = await this.getSessionCookie();
+    }
   }
 
   private makeHeaders(): Record<string, string> {
@@ -104,6 +106,7 @@ export class CanvasClient {
   }
 
   private async request<T>(path: string, attempt = 0): Promise<T> {
+    await this.ensureCookie();
     const url = `${this.baseUrl}/api/v1${path}`;
     const res = await fetch(url, { headers: this.makeHeaders() });
 
@@ -124,6 +127,7 @@ export class CanvasClient {
 
   /** Follows Canvas Link header pagination and returns all items. */
   private async requestAll<T>(path: string, attempt = 0): Promise<T[]> {
+    await this.ensureCookie();
     const sep = path.includes("?") ? "&" : "?";
     const firstRes = await fetch(
       `${this.baseUrl}/api/v1${path}${sep}per_page=100`,
